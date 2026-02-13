@@ -49,8 +49,4 @@ class FileStorageService {
       ..click();
     html.Url.revokeObjectUrl(url);
   }
-
-  String readFileFromWeb(String content) {
-    return content;
-  }
 }

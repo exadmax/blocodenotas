@@ -202,7 +202,7 @@ class _NotepadScreenState extends State<NotepadScreen> {
             onPressed: () {
               Navigator.pop(context);
               _saveFile();
-              Future.delayed(const Duration(milliseconds: 100), onDiscard);
+              onDiscard();
             },
             child: const Text('Salvar'),
           ),

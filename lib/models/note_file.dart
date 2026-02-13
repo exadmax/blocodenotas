@@ -4,10 +4,10 @@ enum FileType {
 }
 
 class NoteFile {
-  String name;
-  String content;
-  FileType type;
-  DateTime lastModified;
+  final String name;
+  final String content;
+  final FileType type;
+  final DateTime lastModified;
 
   NoteFile({
     required this.name,
