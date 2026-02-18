@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -6,6 +8,10 @@ import '../services/file_storage_service.dart';
 import '../widgets/file_manager_dialog.dart';
 
 enum ViewMode { normal, richFormat }
+
+enum _LoadSource { appMemory, device }
+
+enum _WebSaveChoice { appOnly, pcOnly, appAndPc }
 
 class NotepadScreen extends StatefulWidget {
   const NotepadScreen({super.key});
@@ -20,6 +26,9 @@ class _NotepadScreenState extends State<NotepadScreen> {
   NoteFile? _currentFile;
   ViewMode _viewMode = ViewMode.normal;
   bool _hasUnsavedChanges = false;
+
+  bool get _isAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   @override
   void initState() {
@@ -43,7 +52,7 @@ class _NotepadScreenState extends State<NotepadScreen> {
 
   void _newFile() {
     if (_hasUnsavedChanges) {
-      _showUnsavedChangesDialog(() => _createNewFile());
+      _showUnsavedChangesDialog(() async => _createNewFile());
     } else {
       _createNewFile();
     }
@@ -58,52 +67,168 @@ class _NotepadScreenState extends State<NotepadScreen> {
     });
   }
 
-  void _saveFile() {
-    if (_currentFile == null) {
-      _saveAsFile();
-    } else {
-      final updatedFile = _currentFile!.copyWith(
-        content: _textController.text,
-        lastModified: DateTime.now(),
-      );
-      _fileService.saveFile(updatedFile);
-      setState(() {
-        _currentFile = updatedFile;
-        _hasUnsavedChanges = false;
-      });
-      _showSnackBar('Arquivo salvo: ${updatedFile.fullName}');
+  Future<void> _saveFile() async {
+    if (kIsWeb) {
+      await _saveFileWeb();
+      return;
     }
+
+    if (_isAndroid) {
+      await _saveAsFile(
+        saveToDevice: true,
+        initialName: _currentFile?.name,
+        initialType: _currentFile?.type ?? FileType.txt,
+      );
+      return;
+    }
+
+    await _saveInMemoryOnly();
   }
 
-  void _saveAsFile() {
-    showDialog(
+  Future<void> _saveFileWeb() async {
+    final choice = await _showWebSaveOptions();
+    if (choice == null) {
+      return;
+    }
+
+    if (_currentFile == null) {
+      await _saveAsFile(
+        downloadAfterSave:
+            choice == _WebSaveChoice.pcOnly || choice == _WebSaveChoice.appAndPc,
+      );
+      return;
+    }
+
+    final updatedFile = _currentFile!.copyWith(
+      content: _textController.text,
+      lastModified: DateTime.now(),
+    );
+
+    _fileService.saveFile(updatedFile);
+    setState(() {
+      _currentFile = updatedFile;
+      _hasUnsavedChanges = false;
+    });
+
+    if (choice == _WebSaveChoice.pcOnly || choice == _WebSaveChoice.appAndPc) {
+      await _fileService.saveFileToDevice(updatedFile);
+      _showSnackBar('Arquivo salvo e baixado: ${updatedFile.fullName}');
+      return;
+    }
+
+    _showSnackBar('Arquivo salvo no aplicativo: ${updatedFile.fullName}');
+  }
+
+  Future<void> _saveInMemoryOnly() async {
+    if (_currentFile == null) {
+      await _saveAsFile();
+      return;
+    }
+
+    final updatedFile = _currentFile!.copyWith(
+      content: _textController.text,
+      lastModified: DateTime.now(),
+    );
+    _fileService.saveFile(updatedFile);
+    setState(() {
+      _currentFile = updatedFile;
+      _hasUnsavedChanges = false;
+    });
+    _showSnackBar('Arquivo salvo: ${updatedFile.fullName}');
+  }
+
+  Future<void> _saveAsFile({
+    bool downloadAfterSave = false,
+    bool saveToDevice = false,
+    String? initialName,
+    FileType initialType = FileType.txt,
+  }) async {
+    final result = await showDialog<_SaveAsResult>(
       context: context,
       builder: (context) => _SaveAsDialog(
-        onSave: (name, type) {
-          final file = NoteFile(
-            name: name,
-            content: _textController.text,
-            type: type,
-          );
-          _fileService.saveFile(file);
-          setState(() {
-            _currentFile = file;
-            _hasUnsavedChanges = false;
-          });
-          _showSnackBar('Arquivo salvo como: ${file.fullName}');
-        },
+        initialName: initialName,
+        initialType: initialType,
       ),
     );
+
+    if (result == null) {
+      return;
+    }
+
+    final file = NoteFile(
+      name: result.name,
+      content: _textController.text,
+      type: result.type,
+      lastModified: DateTime.now(),
+    );
+
+    _fileService.saveFile(file);
+    setState(() {
+      _currentFile = file;
+      _hasUnsavedChanges = false;
+    });
+
+    if (downloadAfterSave || saveToDevice) {
+      final path = await _fileService.saveFileToDevice(file);
+      if (path != null) {
+        final action = kIsWeb ? 'baixado' : 'salvo no dispositivo';
+        _showSnackBar('Arquivo $action: ${file.fullName}');
+      }
+      return;
+    }
+
+    _showSnackBar('Arquivo salvo como: ${file.fullName}');
   }
 
-  void _loadFile() {
+  Future<void> _loadFile() async {
+    final source = await showModalBottomSheet<_LoadSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder_copy_outlined),
+              title: const Text('Carregar do aplicativo'),
+              subtitle: const Text('Arquivos salvos nesta sessão'),
+              onTap: () => Navigator.pop(context, _LoadSource.appMemory),
+            ),
+            ListTile(
+              leading: const Icon(Icons.upload_file),
+              title: const Text('Carregar do dispositivo'),
+              subtitle: Text(
+                kIsWeb
+                    ? 'Enviar arquivo do computador'
+                    : 'Abrir arquivo do armazenamento do celular',
+              ),
+              onTap: () => Navigator.pop(context, _LoadSource.device),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) {
+      return;
+    }
+
+    if (source == _LoadSource.appMemory) {
+      _openFileManager();
+      return;
+    }
+
+    await _loadFromDevice();
+  }
+
+  void _openFileManager() {
     showDialog(
       context: context,
       builder: (context) => FileManagerDialog(
         files: _fileService.savedFiles,
         onFileSelected: (file) {
           if (_hasUnsavedChanges) {
-            _showUnsavedChangesDialog(() => _openFile(file));
+            _showUnsavedChangesDialog(() async => _openFile(file));
           } else {
             _openFile(file);
           }
@@ -116,22 +241,53 @@ class _NotepadScreenState extends State<NotepadScreen> {
     );
   }
 
+  Future<void> _loadFromDevice() async {
+    final file = await _fileService.pickLocalTextFile();
+
+    if (file == null) {
+      _showSnackBar('Nenhum arquivo selecionado');
+      return;
+    }
+
+    if (_hasUnsavedChanges) {
+      _showUnsavedChangesDialog(() async => _openFile(file));
+    } else {
+      _openFile(file);
+    }
+  }
+
   void _openFile(NoteFile file) {
+    _fileService.saveFile(file);
     setState(() {
       _currentFile = file;
       _textController.text = file.content;
       _hasUnsavedChanges = false;
-      _viewMode = file.type == FileType.md ? ViewMode.richFormat : ViewMode.normal;
+      _viewMode =
+          file.type == FileType.md ? ViewMode.richFormat : ViewMode.normal;
     });
   }
 
-  void _downloadFile() {
-    if (_currentFile != null) {
-      _fileService.downloadFile(_currentFile!);
-      _showSnackBar('Download iniciado: ${_currentFile!.fullName}');
-    } else {
+  Future<void> _downloadFile() async {
+    if (_currentFile == null) {
       _showSnackBar('Salve o arquivo primeiro');
+      return;
     }
+
+    final file = _currentFile!.copyWith(
+      content: _textController.text,
+      lastModified: DateTime.now(),
+    );
+
+    _fileService.saveFile(file);
+    setState(() {
+      _currentFile = file;
+      _hasUnsavedChanges = false;
+    });
+
+    await _fileService.saveFileToDevice(file);
+    _showSnackBar(kIsWeb
+        ? 'Download iniciado: ${file.fullName}'
+        : 'Arquivo salvo no dispositivo: ${file.fullName}');
   }
 
   void _cutText() {
@@ -178,7 +334,7 @@ class _NotepadScreenState extends State<NotepadScreen> {
     });
   }
 
-  void _showUnsavedChangesDialog(VoidCallback onDiscard) {
+  Future<void> _showUnsavedChangesDialog(Future<void> Function() onDiscard) async {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -186,9 +342,9 @@ class _NotepadScreenState extends State<NotepadScreen> {
         content: const Text('Deseja salvar as alterações antes de continuar?'),
         actions: [
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              onDiscard();
+              await onDiscard();
             },
             child: const Text('Descartar'),
           ),
@@ -199,14 +355,45 @@ class _NotepadScreenState extends State<NotepadScreen> {
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              _saveFile();
-              onDiscard();
+              await _saveFile();
+              await onDiscard();
             },
             child: const Text('Salvar'),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<_WebSaveChoice?> _showWebSaveOptions() async {
+    return showModalBottomSheet<_WebSaveChoice>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.save_outlined),
+              title: const Text('Salvar no aplicativo'),
+              subtitle: const Text('Mantém o arquivo na sessão atual'),
+              onTap: () => Navigator.pop(context, _WebSaveChoice.appOnly),
+            ),
+            ListTile(
+              leading: const Icon(Icons.download_outlined),
+              title: const Text('Salvar no computador'),
+              subtitle: const Text('Baixa o arquivo para o seu PC'),
+              onTap: () => Navigator.pop(context, _WebSaveChoice.pcOnly),
+            ),
+            ListTile(
+              leading: const Icon(Icons.save_alt_outlined),
+              title: const Text('Salvar no aplicativo e no computador'),
+              onTap: () => Navigator.pop(context, _WebSaveChoice.appAndPc),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
@@ -219,158 +406,273 @@ class _NotepadScreenState extends State<NotepadScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _currentFile?.fullName ?? 'Novo Arquivo',
-          style: TextStyle(
-            fontWeight: _hasUnsavedChanges ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-        actions: [
-          if (_hasUnsavedChanges)
-            const Padding(
-              padding: EdgeInsets.only(right: 8.0),
-              child: Icon(Icons.circle, size: 8, color: Colors.orange),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 720;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(
+              _currentFile?.fullName ?? 'Novo Arquivo',
+              style: TextStyle(
+                fontWeight:
+                    _hasUnsavedChanges ? FontWeight.bold : FontWeight.normal,
+              ),
             ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _buildMenuBar(),
-          Expanded(
-            child: _buildEditor(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMenuBar() {
-    return Container(
-      color: Colors.grey[200],
-      child: Row(
-        children: [
-          _buildMenu(
-            'Arquivo',
-            [
-              _MenuItem('Novo', Icons.description, _newFile),
-              _MenuItem('Salvar', Icons.save, _saveFile),
-              _MenuItem('Salvar Como', Icons.save_as, _saveAsFile),
-              _MenuItem('Carregar', Icons.folder_open, _loadFile),
-              _MenuItem('Download', Icons.download, _downloadFile),
+            actions: [
+              if (_hasUnsavedChanges)
+                const Padding(
+                  padding: EdgeInsets.only(right: 8),
+                  child: Icon(Icons.circle, size: 10, color: Colors.orange),
+                ),
             ],
           ),
-          _buildMenu(
-            'Editar',
-            [
-              _MenuItem('Recortar', Icons.content_cut, _cutText),
-              _MenuItem('Copiar', Icons.content_copy, _copyText),
-              _MenuItem('Selecionar Tudo', Icons.select_all, _selectAll),
-            ],
-          ),
-          _buildMenu(
-            'Exibir',
-            [
-              _MenuItem(
-                'Normal',
-                Icons.text_fields,
-                () => _toggleViewMode(ViewMode.normal),
-                isSelected: _viewMode == ViewMode.normal,
-              ),
-              _MenuItem(
-                'Formato Rich',
-                Icons.format_paint,
-                () => _toggleViewMode(ViewMode.richFormat),
-                isSelected: _viewMode == ViewMode.richFormat,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMenu(String title, List<_MenuItem> items) {
-    return PopupMenuButton<VoidCallback>(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Text(
-          title,
-          style: const TextStyle(fontSize: 16),
-        ),
-      ),
-      onSelected: (callback) => callback(),
-      itemBuilder: (context) => items
-          .map(
-            (item) => PopupMenuItem<VoidCallback>(
-              value: item.onTap,
-              child: Row(
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
                 children: [
-                  Icon(item.icon, size: 20),
-                  const SizedBox(width: 12),
-                  Text(item.title),
-                  if (item.isSelected) ...[
-                    const Spacer(),
-                    const Icon(Icons.check, size: 20),
-                  ],
+                  _buildActionPanel(isCompact),
+                  const SizedBox(height: 12),
+                  _buildInfoPanel(),
+                  const SizedBox(height: 12),
+                  Expanded(child: _buildEditorPanel()),
                 ],
               ),
             ),
-          )
-          .toList(),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildEditor() {
-    if (_viewMode == ViewMode.richFormat) {
-      return Container(
-        color: Colors.white,
-        padding: const EdgeInsets.all(16),
-        child: Markdown(
-          data: _textController.text,
-          selectable: true,
+  Widget _buildActionPanel(bool isCompact) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Arquivo', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildActionButton('Novo', Icons.description_outlined, _newFile),
+                _buildActionButton('Salvar', Icons.save_outlined, _saveFile),
+                _buildActionButton(
+                  'Salvar Como',
+                  Icons.save_as_outlined,
+                  () => _saveAsFile(
+                    initialName: _currentFile?.name,
+                    initialType: _currentFile?.type ?? FileType.txt,
+                    saveToDevice: _isAndroid,
+                  ),
+                ),
+                _buildActionButton(
+                  'Carregar',
+                  Icons.folder_open_outlined,
+                  _loadFile,
+                ),
+                if (kIsWeb || _isAndroid)
+                  _buildActionButton(
+                    kIsWeb ? 'Baixar' : 'Salvar no Dispositivo',
+                    Icons.download_outlined,
+                    _downloadFile,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text('Editar', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildActionButton('Recortar', Icons.content_cut, _cutText),
+                _buildActionButton('Copiar', Icons.content_copy, _copyText),
+                _buildActionButton(
+                  'Selecionar Tudo',
+                  Icons.select_all,
+                  _selectAll,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text('Exibição', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: isCompact ? double.infinity : null,
+              child: SegmentedButton<ViewMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: ViewMode.normal,
+                    icon: Icon(Icons.text_fields),
+                    label: Text('Normal'),
+                  ),
+                  ButtonSegment(
+                    value: ViewMode.richFormat,
+                    icon: Icon(Icons.format_paint_outlined),
+                    label: Text('Formato Rich'),
+                  ),
+                ],
+                selected: {_viewMode},
+                onSelectionChanged: (selection) {
+                  _toggleViewMode(selection.first);
+                },
+              ),
+            ),
+          ],
         ),
-      );
-    }
+      ),
+    );
+  }
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: TextField(
-        controller: _textController,
-        maxLines: null,
-        expands: true,
-        decoration: const InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Digite seu texto aqui...',
+  Widget _buildActionButton(String label, IconData icon, VoidOrFutureCallback onTap) {
+    return OutlinedButton.icon(
+      onPressed: () => onTap(),
+      icon: Icon(icon),
+      label: Text(label),
+    );
+  }
+
+  Widget _buildInfoPanel() {
+    final fileType = _currentFile?.type == FileType.md ? '.md' : '.txt';
+    final modeLabel =
+        _viewMode == ViewMode.normal ? 'Editor de texto' : 'Visualização Markdown';
+    final statusLabel = _hasUnsavedChanges ? 'Com alterações pendentes' : 'Atualizado';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            _InfoChip(label: 'Arquivo', value: _currentFile?.fullName ?? 'Não salvo'),
+            _InfoChip(label: 'Tipo', value: _currentFile == null ? '-' : fileType),
+            _InfoChip(label: 'Modo', value: modeLabel),
+            _InfoChip(label: 'Status', value: statusLabel),
+          ],
         ),
-        style: const TextStyle(fontSize: 16),
+      ),
+    );
+  }
+
+  Widget _buildEditorPanel() {
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: Text(
+              _viewMode == ViewMode.richFormat
+                  ? 'Pré-visualização'
+                  : 'Conteúdo do arquivo',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _viewMode == ViewMode.richFormat
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Markdown(
+                      data: _textController.text,
+                      selectable: true,
+                    ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: TextField(
+                      controller: _textController,
+                      maxLines: null,
+                      expands: true,
+                      decoration: InputDecoration(
+                        hintText: 'Digite seu texto aqui...',
+                        filled: true,
+                        fillColor: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withValues(alpha: 0.25),
+                        border: const OutlineInputBorder(),
+                        enabledBorder: const OutlineInputBorder(),
+                        focusedBorder: const OutlineInputBorder(),
+                      ),
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _MenuItem {
-  final String title;
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool isSelected;
+typedef VoidOrFutureCallback = FutureOr<void> Function();
 
-  _MenuItem(this.title, this.icon, this.onTap, {this.isSelected = false});
+class _InfoChip extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoChip({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: RichText(
+        text: TextSpan(
+          style: Theme.of(context).textTheme.bodyMedium,
+          children: [
+            TextSpan(
+              text: '$label: ',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            TextSpan(text: value),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SaveAsResult {
+  final String name;
+  final FileType type;
+
+  const _SaveAsResult({required this.name, required this.type});
 }
 
 class _SaveAsDialog extends StatefulWidget {
-  final Function(String name, FileType type) onSave;
+  final String? initialName;
+  final FileType initialType;
 
-  const _SaveAsDialog({required this.onSave});
+  const _SaveAsDialog({
+    this.initialName,
+    required this.initialType,
+  });
 
   @override
   State<_SaveAsDialog> createState() => _SaveAsDialogState();
 }
 
 class _SaveAsDialogState extends State<_SaveAsDialog> {
-  final TextEditingController _nameController = TextEditingController();
-  FileType _selectedType = FileType.txt;
+  late final TextEditingController _nameController;
+  late FileType _selectedType;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName ?? '');
+    _selectedType = widget.initialType;
+  }
 
   @override
   void dispose() {
@@ -429,9 +731,14 @@ class _SaveAsDialogState extends State<_SaveAsDialog> {
         ),
         FilledButton(
           onPressed: () {
-            if (_nameController.text.isNotEmpty) {
-              widget.onSave(_nameController.text, _selectedType);
-              Navigator.pop(context);
+            if (_nameController.text.trim().isNotEmpty) {
+              Navigator.pop(
+                context,
+                _SaveAsResult(
+                  name: _nameController.text.trim(),
+                  type: _selectedType,
+                ),
+              );
             }
           },
           child: const Text('Salvar'),
