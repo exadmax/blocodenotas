@@ -53,7 +53,20 @@ void main() {
       expect(copy.name, equals('original'));
       expect(copy.content, equals('New content'));
       expect(copy.type, equals(FileType.txt));
-      expect(copy.lastModified, isNot(equals(original.lastModified)));
+      expect(copy.lastModified, equals(original.lastModified));
+    });
+
+    test('should copy file with new lastModified when provided', () {
+      final original = NoteFile(
+        name: 'original',
+        content: 'Content',
+        type: FileType.txt,
+      );
+      final updatedAt = original.lastModified.add(const Duration(seconds: 1));
+
+      final copy = original.copyWith(lastModified: updatedAt);
+
+      expect(copy.lastModified, equals(updatedAt));
     });
   });
 }

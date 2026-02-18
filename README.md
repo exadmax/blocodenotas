@@ -68,9 +68,25 @@ flutter run -d android
 # Build para Web
 flutter build web
 
+# Build para Web no GitHub Pages (repo project page)
+flutter build web --release --base-href /blocodenotas/
+
 # Build para Android
 flutter build apk
 ```
+
+## Publicação no GitHub Pages
+
+O projeto já possui workflow em `.github/workflows/deploy-github-pages.yml` para publicar automaticamente a versão Web.
+
+### Passos
+1. Faça push para a branch `main`.
+2. No GitHub, vá em **Settings > Pages**.
+3. Em **Build and deployment**, selecione **Source: GitHub Actions**.
+4. Aguarde o workflow **Deploy Web no GitHub Pages** concluir.
+
+### URL esperada
+- `https://exadmax.github.io/blocodenotas/`
 
 ## Dependências
 
