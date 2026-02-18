@@ -13,6 +13,19 @@ enum _LoadSource { appMemory, device }
 
 enum _WebSaveChoice { appOnly, pcOnly, appAndPc }
 
+enum _MenuAction {
+  newFile,
+  save,
+  saveAs,
+  load,
+  download,
+  cut,
+  copy,
+  selectAll,
+  viewNormal,
+  viewRich,
+}
+
 class NotepadScreen extends StatefulWidget {
   const NotepadScreen({super.key});
 
@@ -432,7 +445,7 @@ class _NotepadScreenState extends State<NotepadScreen> {
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  _buildActionPanel(isCompact),
+                  _buildStructuredMenuBar(isCompact),
                   const SizedBox(height: 12),
                   _buildInfoPanel(),
                   const SizedBox(height: 12),
@@ -446,94 +459,163 @@ class _NotepadScreenState extends State<NotepadScreen> {
     );
   }
 
-  Widget _buildActionPanel(bool isCompact) {
+  Future<void> _handleMenuAction(_MenuAction action) async {
+    switch (action) {
+      case _MenuAction.newFile:
+        _newFile();
+        break;
+      case _MenuAction.save:
+        await _saveFile();
+        break;
+      case _MenuAction.saveAs:
+        await _saveAsFile(
+          initialName: _currentFile?.name,
+          initialType: _currentFile?.type ?? FileType.txt,
+          saveToDevice: _isAndroid,
+        );
+        break;
+      case _MenuAction.load:
+        await _loadFile();
+        break;
+      case _MenuAction.download:
+        await _downloadFile();
+        break;
+      case _MenuAction.cut:
+        _cutText();
+        break;
+      case _MenuAction.copy:
+        _copyText();
+        break;
+      case _MenuAction.selectAll:
+        _selectAll();
+        break;
+      case _MenuAction.viewNormal:
+        _toggleViewMode(ViewMode.normal);
+        break;
+      case _MenuAction.viewRich:
+        _toggleViewMode(ViewMode.richFormat);
+        break;
+    }
+  }
+
+  Widget _buildStructuredMenuBar(bool isCompact) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Arquivo', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _buildActionButton('Novo', Icons.description_outlined, _newFile),
-                _buildActionButton('Salvar', Icons.save_outlined, _saveFile),
-                _buildActionButton(
-                  'Salvar Como',
-                  Icons.save_as_outlined,
-                  () => _saveAsFile(
-                    initialName: _currentFile?.name,
-                    initialType: _currentFile?.type ?? FileType.txt,
-                    saveToDevice: _isAndroid,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Wrap(
+            spacing: isCompact ? 2 : 4,
+            children: [
+              _buildCategoryMenu(
+                title: 'Arquivo',
+                items: [
+                  _MenuEntry(
+                    action: _MenuAction.newFile,
+                    label: 'Novo',
+                    icon: Icons.description_outlined,
                   ),
-                ),
-                _buildActionButton(
-                  'Carregar',
-                  Icons.folder_open_outlined,
-                  _loadFile,
-                ),
-                if (kIsWeb || _isAndroid)
-                  _buildActionButton(
-                    kIsWeb ? 'Baixar' : 'Salvar no Dispositivo',
-                    Icons.download_outlined,
-                    _downloadFile,
+                  _MenuEntry(
+                    action: _MenuAction.save,
+                    label: 'Salvar',
+                    icon: Icons.save_outlined,
                   ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Text('Editar', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _buildActionButton('Recortar', Icons.content_cut, _cutText),
-                _buildActionButton('Copiar', Icons.content_copy, _copyText),
-                _buildActionButton(
-                  'Selecionar Tudo',
-                  Icons.select_all,
-                  _selectAll,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Text('Exibição', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: isCompact ? double.infinity : null,
-              child: SegmentedButton<ViewMode>(
-                segments: const [
-                  ButtonSegment(
-                    value: ViewMode.normal,
-                    icon: Icon(Icons.text_fields),
-                    label: Text('Normal'),
+                  _MenuEntry(
+                    action: _MenuAction.saveAs,
+                    label: 'Salvar Como',
+                    icon: Icons.save_as_outlined,
                   ),
-                  ButtonSegment(
-                    value: ViewMode.richFormat,
-                    icon: Icon(Icons.format_paint_outlined),
-                    label: Text('Formato Rich'),
+                  _MenuEntry(
+                    action: _MenuAction.load,
+                    label: 'Carregar',
+                    icon: Icons.folder_open_outlined,
+                  ),
+                  if (kIsWeb || _isAndroid)
+                    _MenuEntry(
+                      action: _MenuAction.download,
+                      label: kIsWeb ? 'Baixar' : 'Salvar no Dispositivo',
+                      icon: Icons.download_outlined,
+                    ),
+                ],
+              ),
+              _buildCategoryMenu(
+                title: 'Editar',
+                items: const [
+                  _MenuEntry(
+                    action: _MenuAction.cut,
+                    label: 'Recortar',
+                    icon: Icons.content_cut,
+                  ),
+                  _MenuEntry(
+                    action: _MenuAction.copy,
+                    label: 'Copiar',
+                    icon: Icons.content_copy,
+                  ),
+                  _MenuEntry(
+                    action: _MenuAction.selectAll,
+                    label: 'Selecionar Tudo',
+                    icon: Icons.select_all,
                   ),
                 ],
-                selected: {_viewMode},
-                onSelectionChanged: (selection) {
-                  _toggleViewMode(selection.first);
-                },
               ),
-            ),
-          ],
+              _buildCategoryMenu(
+                title: 'Exibir',
+                items: [
+                  _MenuEntry(
+                    action: _MenuAction.viewNormal,
+                    label: 'Normal',
+                    icon: _viewMode == ViewMode.normal
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                  ),
+                  _MenuEntry(
+                    action: _MenuAction.viewRich,
+                    label: 'Formato Rich',
+                    icon: _viewMode == ViewMode.richFormat
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildActionButton(String label, IconData icon, VoidOrFutureCallback onTap) {
-    return OutlinedButton.icon(
-      onPressed: () => onTap(),
-      icon: Icon(icon),
-      label: Text(label),
+  Widget _buildCategoryMenu({
+    required String title,
+    required List<_MenuEntry> items,
+  }) {
+    return PopupMenuButton<_MenuAction>(
+      tooltip: title,
+      onSelected: (action) {
+        unawaited(_handleMenuAction(action));
+      },
+      itemBuilder: (context) {
+        return items
+            .map(
+              (item) => PopupMenuItem<_MenuAction>(
+                value: item.action,
+                child: Row(
+                  children: [
+                    Icon(item.icon, size: 20),
+                    const SizedBox(width: 12),
+                    Text(item.label),
+                  ],
+                ),
+              ),
+            )
+            .toList();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Text(
+          title,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+      ),
     );
   }
 
@@ -611,7 +693,17 @@ class _NotepadScreenState extends State<NotepadScreen> {
   }
 }
 
-typedef VoidOrFutureCallback = FutureOr<void> Function();
+class _MenuEntry {
+  final _MenuAction action;
+  final String label;
+  final IconData icon;
+
+  const _MenuEntry({
+    required this.action,
+    required this.label,
+    required this.icon,
+  });
+}
 
 class _InfoChip extends StatelessWidget {
   final String label;
