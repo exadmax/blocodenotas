@@ -2,6 +2,10 @@
 
 Projeto Flutter para Android e Web que trabalha com bloco de notas de arquivos .txt e arquivos .md
 
+## Aplicação funcional
+
+- Acesse: [https://exadmax.github.io/blocodenotas/](https://exadmax.github.io/blocodenotas/)
+
 ## Funcionalidades
 
 ### Gerenciamento de Arquivos

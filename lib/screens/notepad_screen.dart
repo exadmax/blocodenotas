@@ -444,12 +444,40 @@ class _NotepadScreenState extends State<NotepadScreen> {
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _buildStructuredMenuBar(isCompact),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: _buildStructuredMenuBar(isCompact),
+                  ),
                   const SizedBox(height: 12),
-                  _buildInfoPanel(),
+                  Expanded(
+                    child: isCompact
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(child: _buildEditorPanel()),
+                              const SizedBox(height: 12),
+                              _buildInfoPanel(),
+                            ],
+                          )
+                        : Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(flex: 5, child: _buildEditorPanel()),
+                              const SizedBox(width: 12),
+                              SizedBox(
+                                width: 260,
+                                child: _buildInfoPanel(),
+                              ),
+                            ],
+                          ),
+                  ),
                   const SizedBox(height: 12),
-                  Expanded(child: _buildEditorPanel()),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: _buildStatusChip(),
+                  ),
                 ],
               ),
             ),
@@ -623,29 +651,39 @@ class _NotepadScreenState extends State<NotepadScreen> {
     final fileType = _currentFile?.type == FileType.md ? '.md' : '.txt';
     final modeLabel =
         _viewMode == ViewMode.normal ? 'Editor de texto' : 'Visualização Markdown';
-    final statusLabel = _hasUnsavedChanges ? 'Com alterações pendentes' : 'Atualizado';
 
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Wrap(
-          spacing: 12,
-          runSpacing: 8,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _InfoChip(label: 'Arquivo', value: _currentFile?.fullName ?? 'Não salvo'),
+            const SizedBox(height: 8),
             _InfoChip(label: 'Tipo', value: _currentFile == null ? '-' : fileType),
+            const SizedBox(height: 8),
             _InfoChip(label: 'Modo', value: modeLabel),
-            _InfoChip(label: 'Status', value: statusLabel),
           ],
         ),
       ),
     );
   }
 
+  Widget _buildStatusChip() {
+    final statusLabel = _hasUnsavedChanges ? 'Com alterações pendentes' : 'Atualizado';
+
+    return _InfoChip(label: 'Status', value: statusLabel);
+  }
+
   Widget _buildEditorPanel() {
+    final editorBackground = Theme.of(context)
+        .colorScheme
+        .surfaceContainerHighest
+        .withValues(alpha: 0.25);
+
     return Card(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
@@ -658,34 +696,44 @@ class _NotepadScreenState extends State<NotepadScreen> {
           ),
           const Divider(height: 1),
           Expanded(
-            child: _viewMode == ViewMode.richFormat
-                ? Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Markdown(
-                      data: _textController.text,
-                      selectable: true,
-                    ),
-                  )
-                : Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: TextField(
-                      controller: _textController,
-                      maxLines: null,
-                      expands: true,
-                      decoration: InputDecoration(
-                        hintText: 'Digite seu texto aqui...',
-                        filled: true,
-                        fillColor: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest
-                            .withValues(alpha: 0.25),
-                        border: const OutlineInputBorder(),
-                        enabledBorder: const OutlineInputBorder(),
-                        focusedBorder: const OutlineInputBorder(),
-                      ),
-                      style: const TextStyle(fontSize: 16),
-                    ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: editorBackground,
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outline,
                   ),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: _viewMode == ViewMode.richFormat
+                    ? (_textController.text.trim().isEmpty
+                        ? const Align(
+                            alignment: Alignment.topLeft,
+                            child: Padding(
+                              padding: EdgeInsets.all(12),
+                              child: Text('Digite seu texto para visualizar no formato Rich.'),
+                            ),
+                          )
+                        : Markdown(
+                            data: _textController.text,
+                            selectable: true,
+                            padding: const EdgeInsets.all(12),
+                          ))
+                    : TextField(
+                        controller: _textController,
+                        maxLines: null,
+                        expands: true,
+                        textAlignVertical: TextAlignVertical.top,
+                        decoration: const InputDecoration(
+                          hintText: 'Digite seu texto aqui...',
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.all(12),
+                        ),
+                        style: const TextStyle(fontSize: 16),
+                      ),
+              ),
+            ),
           ),
         ],
       ),
