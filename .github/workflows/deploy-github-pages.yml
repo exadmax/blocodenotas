@@ -36,6 +36,9 @@ jobs:
       - name: Build Web para GitHub Pages
         run: flutter build web --release --base-href /blocodenotas/
 
+      - name: Desabilitar Jekyll no artifact
+        run: touch build/web/.nojekyll
+
       - name: Configurar Pages
         uses: actions/configure-pages@v5
 
