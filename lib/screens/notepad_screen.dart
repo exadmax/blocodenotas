@@ -35,6 +35,8 @@ class NotepadScreen extends StatefulWidget {
 
 class _NotepadScreenState extends State<NotepadScreen> {
   final TextEditingController _textController = TextEditingController();
+  final ScrollController _editorScrollController = ScrollController();
+  final ScrollController _previewScrollController = ScrollController();
   final FileStorageService _fileService = FileStorageService();
   NoteFile? _currentFile;
   ViewMode _viewMode = ViewMode.normal;
@@ -60,6 +62,8 @@ class _NotepadScreenState extends State<NotepadScreen> {
   @override
   void dispose() {
     _textController.dispose();
+    _editorScrollController.dispose();
+    _previewScrollController.dispose();
     super.dispose();
   }
 
@@ -452,31 +456,24 @@ class _NotepadScreenState extends State<NotepadScreen> {
                   ),
                   const SizedBox(height: 12),
                   Expanded(
-                    child: isCompact
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(child: _buildEditorPanel()),
-                              const SizedBox(height: 12),
-                              _buildInfoPanel(),
-                            ],
-                          )
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(flex: 5, child: _buildEditorPanel()),
-                              const SizedBox(width: 12),
-                              SizedBox(
-                                width: 260,
-                                child: _buildInfoPanel(),
-                              ),
-                            ],
-                          ),
-                  ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: _buildStatusChip(),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withValues(alpha: 0.22),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: _buildEditorPanel()),
+                          const SizedBox(height: 12),
+                          _buildStatusSection(isCompact),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -527,13 +524,142 @@ class _NotepadScreenState extends State<NotepadScreen> {
   }
 
   Widget _buildStructuredMenuBar(bool isCompact) {
+    final menuGroups = [
+      (
+        'Arquivo',
+        [
+          _MenuEntry(
+            action: _MenuAction.newFile,
+            label: 'Novo',
+            icon: Icons.description_outlined,
+          ),
+          _MenuEntry(
+            action: _MenuAction.save,
+            label: 'Salvar',
+            icon: Icons.save_outlined,
+          ),
+          _MenuEntry(
+            action: _MenuAction.saveAs,
+            label: 'Salvar Como',
+            icon: Icons.save_as_outlined,
+          ),
+          _MenuEntry(
+            action: _MenuAction.load,
+            label: 'Carregar',
+            icon: Icons.folder_open_outlined,
+          ),
+          if (kIsWeb || _isAndroid)
+            _MenuEntry(
+              action: _MenuAction.download,
+              label: kIsWeb ? 'Baixar' : 'Salvar no Dispositivo',
+              icon: Icons.download_outlined,
+            ),
+        ],
+      ),
+      (
+        'Editar',
+        const [
+          _MenuEntry(
+            action: _MenuAction.cut,
+            label: 'Recortar',
+            icon: Icons.content_cut,
+          ),
+          _MenuEntry(
+            action: _MenuAction.copy,
+            label: 'Copiar',
+            icon: Icons.content_copy,
+          ),
+          _MenuEntry(
+            action: _MenuAction.selectAll,
+            label: 'Selecionar Tudo',
+            icon: Icons.select_all,
+          ),
+        ],
+      ),
+      (
+        'Exibir',
+        [
+          _MenuEntry(
+            action: _MenuAction.viewNormal,
+            label: 'Normal',
+            icon: _viewMode == ViewMode.normal
+                ? Icons.radio_button_checked
+                : Icons.radio_button_unchecked,
+          ),
+          _MenuEntry(
+            action: _MenuAction.viewRich,
+            label: 'Formato Rich',
+            icon: _viewMode == ViewMode.richFormat
+                ? Icons.radio_button_checked
+                : Icons.radio_button_unchecked,
+          ),
+        ],
+      ),
+    ];
+
+    if (isCompact) {
+      return Card(
+        child: PopupMenuButton<_MenuAction>(
+          tooltip: 'Menu',
+          onSelected: (action) {
+            unawaited(_handleMenuAction(action));
+          },
+          itemBuilder: (context) {
+            final allItems = <PopupMenuEntry<_MenuAction>>[];
+            for (final group in menuGroups) {
+              final title = group.$1;
+              final items = group.$2;
+              allItems.add(
+                PopupMenuItem<_MenuAction>(
+                  enabled: false,
+                  child: Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              );
+              allItems.addAll(
+                items.map(
+                  (item) => PopupMenuItem<_MenuAction>(
+                    value: item.action,
+                    child: Row(
+                      children: [
+                        Icon(item.icon, size: 20),
+                        const SizedBox(width: 12),
+                        Text(item.label),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+              if (group != menuGroups.last) {
+                allItems.add(const PopupMenuDivider());
+              }
+            }
+            return allItems;
+          },
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.menu),
+                SizedBox(width: 8),
+                Text('Menu'),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Wrap(
-            spacing: isCompact ? 2 : 4,
+            spacing: 4,
             children: [
               _buildCategoryMenu(
                 title: 'Arquivo',
@@ -647,32 +773,28 @@ class _NotepadScreenState extends State<NotepadScreen> {
     );
   }
 
-  Widget _buildInfoPanel() {
-    final fileType = _currentFile?.type == FileType.md ? '.md' : '.txt';
-    final modeLabel =
-        _viewMode == ViewMode.normal ? 'Editor de texto' : 'Visualização Markdown';
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _InfoChip(label: 'Arquivo', value: _currentFile?.fullName ?? 'Não salvo'),
-            const SizedBox(height: 8),
-            _InfoChip(label: 'Tipo', value: _currentFile == null ? '-' : fileType),
-            const SizedBox(height: 8),
-            _InfoChip(label: 'Modo', value: modeLabel),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusChip() {
+  Widget _buildStatusSection(bool isCompact) {
     final statusLabel = _hasUnsavedChanges ? 'Com alterações pendentes' : 'Atualizado';
 
-    return _InfoChip(label: 'Status', value: statusLabel);
+    final chips = [
+      _InfoChip(label: 'Arquivo', value: _currentFile?.fullName ?? 'Não salvo'),
+      _InfoChip(label: 'Tipo', value: _currentFile == null ? '-' : (_currentFile?.type == FileType.md ? '.md' : '.txt')),
+      _InfoChip(
+        label: 'Modo',
+        value: _viewMode == ViewMode.normal ? 'Editor de texto' : 'Visualização Markdown',
+      ),
+      _InfoChip(label: 'Status', value: statusLabel),
+    ];
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        alignment: isCompact ? WrapAlignment.start : WrapAlignment.end,
+        children: chips,
+      ),
+    );
   }
 
   Widget _buildEditorPanel() {
@@ -715,22 +837,32 @@ class _NotepadScreenState extends State<NotepadScreen> {
                               child: Text('Digite seu texto para visualizar no formato Rich.'),
                             ),
                           )
-                        : Markdown(
-                            data: _textController.text,
-                            selectable: true,
-                            padding: const EdgeInsets.all(12),
+                        : Scrollbar(
+                            controller: _previewScrollController,
+                            thumbVisibility: true,
+                            child: Markdown(
+                              controller: _previewScrollController,
+                              data: _textController.text,
+                              selectable: true,
+                              padding: const EdgeInsets.all(12),
+                            ),
                           ))
-                    : TextField(
-                        controller: _textController,
-                        maxLines: null,
-                        expands: true,
-                        textAlignVertical: TextAlignVertical.top,
-                        decoration: const InputDecoration(
-                          hintText: 'Digite seu texto aqui...',
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.all(12),
+                    : Scrollbar(
+                        controller: _editorScrollController,
+                        thumbVisibility: true,
+                        child: TextField(
+                          controller: _textController,
+                          scrollController: _editorScrollController,
+                          maxLines: null,
+                          expands: true,
+                          textAlignVertical: TextAlignVertical.top,
+                          decoration: const InputDecoration(
+                            hintText: 'Digite seu texto aqui...',
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.all(12),
+                          ),
+                          style: const TextStyle(fontSize: 16),
                         ),
-                        style: const TextStyle(fontSize: 16),
                       ),
               ),
             ),
